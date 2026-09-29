@@ -14,7 +14,7 @@ GitHub Pages 目标地址：https://zhengzhunlun19881225.github.io/3dGS/
 gh release download scene-assets-v1 --repo zhengzhunlun19881225/3dGS --pattern scene.ply --dir model-gs-ply
 ```
 
-替换模型时需要更新 Release 附件及 `model-gs-ply/scene.sha256` 中的 SHA-256。首次在线访问需下载约 466 MB 并生成 LoD，等待时间取决于网络和设备。
+替换模型时需要更新 Release 附件、`model-gs-ply/scene.sha256` 中的 SHA-256，以及 `src/default-scene.js` 中的字节数与版本哈希。首次在线访问需下载约 466 MB 并生成 LoD，等待时间取决于网络和设备。页面显示下载进度，完整下载并核对字节数后才交给解析器；不完整响应最多自动尝试 3 次，失败后可点击「重新加载场景」。
 
 ## 运行
 
@@ -61,6 +61,6 @@ npm run build
 npm run preview
 ```
 
-测试覆盖 PLY 类型识别、朝向移动、斜向速度、帧率稳定性、跳跃落地和 LoD 边界计算。构建产物在 `dist/`，包含模型文件，可部署到静态服务；模型文件未纳入 Git。
+测试覆盖 PLY 类型识别、朝向移动、斜向速度、帧率稳定性、跳跃落地、LoD 边界计算，以及局部响应、截断下载、取消与错误提示。构建产物在 `dist/`，包含模型文件，可部署到静态服务；模型文件未纳入 Git。
 
 参考：[Spark 文档](https://sparkjs.dev/docs/)、[SplatMesh API](https://sparkjs.dev/docs/splat-mesh/)。

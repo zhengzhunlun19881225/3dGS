@@ -7,6 +7,8 @@ import { Player } from './player.js';
 import { getSplatBounds } from './splat-bounds.js';
 import { createAvatar } from './avatar.js';
 import { createMonitoring } from './monitoring.js';
+import { downloadScene, describeLoadError } from './scene-download.js';
+import { defaultScene } from './default-scene.js';
 import './style.css';
 
 const $ = id => document.getElementById(id);
@@ -228,7 +230,14 @@ function disposeModel(object) {
   if (object instanceof SplatMesh) object.dispose();
   else { object.geometry?.dispose(); object.material?.dispose(); }
 }
-async function loadScene({ file, url, name }) {
+let activeDownload = null, lastLoadRequest = null;
+async function loadScene(request) {
+  let { file, url, name, expectedBytes } = request;
+  lastLoadRequest = request;
+  activeDownload?.abort();
+  const download = new AbortController();
+  activeDownload = download;
+  $('retry-load').hidden = true;
   const sequence = ++loadSequence;
   name ||= file?.name || 'scene.ply';
   document.exitPointerLock?.();
@@ -237,35 +246,33 @@ async function loadScene({ file, url, name }) {
   status(`正在读取 ${name}…`);
   let candidate;
   try {
+    if (url) {
+      const blob = await downloadScene(url, {
+        expectedBytes, signal: download.signal,
+        onProgress(received, total, attempt) {
+          if (sequence !== loadSequence) return;
+          const mb = bytes => (bytes / 1048576).toFixed(1);
+          status(`${attempt ? `重试 ${attempt}/2 · ` : ''}下载场景 ${mb(received)}${total ? ` / ${mb(total)} MB（${Math.floor(received / total * 100)}%）` : ' MB'}，请保持页面打开`);
+        },
+      });
+      if (sequence !== loadSequence) return;
+      file = new File([blob], name, { type: 'application/octet-stream' });
+    }
     let info;
     if (/\.ply$/i.test(name)) {
-      let header;
-      if (file) header = await file.slice(0, 65536).arrayBuffer();
-      else {
-        const response = await fetch(url, { headers: { Range: 'bytes=0-65535' } });
-        if (!response.ok) throw new Error(`读取失败（HTTP ${response.status}）`);
-        const reader = response.body.getReader();
-        const first = await reader.read();
-        // Range support is available in the bundled server; cancel a full response.
-        const chunks = [first.value]; let length = first.value?.length || 0;
-        while (length < 65536) { const next = await reader.read(); if (next.done) break; chunks.push(next.value); length += next.value.length; }
-        await reader.cancel();
-        const joined = new Uint8Array(length); let offset = 0;
-        for (const chunk of chunks) { joined.set(chunk, offset); offset += chunk.length; }
-        header = joined.buffer;
-      }
+      const header = await file.slice(0, 65536).arrayBuffer();
       info = inspectPly(header);
     } else if (/\.(spz|splat|ksplat)$/i.test(name)) info = { type: 'gaussian' };
     else throw new Error('请选择 PLY、SPZ、SPLAT 或 KSPLAT 文件。');
     if (sequence !== loadSequence) return;
     if (info.type === 'gaussian') {
-      status('正在加载高斯场景并构建细节层级，请稍候…');
+      status('模型下载完整 · 正在解析并构建细节层级，请稍候…');
       const objectUrl = file ? URL.createObjectURL(file) : null;
       try {
         candidate = new SplatMesh({ url: objectUrl || url, fileName: name, fileType: name.split('.').at(-1).toLowerCase(), lod: true, onProgress: event => {
           if (sequence !== loadSequence) return;
           const progress = event.total ? `${Math.round(event.loaded / event.total * 100)}%` : `${(event.loaded / 1048576).toFixed(0)} MB`;
-          status(`加载高斯场景 ${progress} · 随后构建细节层级`);
+          status(`解析高斯数据 ${progress} · 随后构建细节层级`);
         } });
         await candidate.initialized;
       } finally { if (objectUrl) URL.revokeObjectURL(objectUrl); }
@@ -301,10 +308,13 @@ async function loadScene({ file, url, name }) {
     status('场景已就绪 · 可调整向上轴与地面高度，再进入漫游');
   } catch (error) {
     if (candidate && candidate !== model) disposeModel(candidate);
-    if (sequence === loadSequence) status(`加载失败：${error.message}`, true);
+    if (sequence !== loadSequence || download.signal.aborted) return;
+    status(`加载失败：${describeLoadError(error)}`, true);
+    $('retry-load').hidden = false;
     console.error(error);
   }
 }
+$('retry-load').addEventListener('click', () => { if (lastLoadRequest) loadScene(lastLoadRequest); });
 $('import-button').addEventListener('click', () => $('file-input').click());
 $('file-input').addEventListener('change', event => { const file = event.target.files[0]; if (file) loadScene({ file }); event.target.value = ''; });
 let dragDepth = 0;
@@ -331,4 +341,4 @@ renderer.setAnimationLoop(time => {
 });
 resetPlayer();
 frameScene();
-if (!new URLSearchParams(location.search).has('demo')) loadScene({ url: `${import.meta.env.BASE_URL}scene.ply`, name: 'scene.ply' });
+if (!new URLSearchParams(location.search).has('demo')) loadScene({ ...defaultScene, url: `${import.meta.env.BASE_URL}scene.ply?v=${defaultScene.version}` });
