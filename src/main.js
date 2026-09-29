@@ -1,15 +1,19 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
 import { inspectPly } from './ply.js';
-import { Player } from './player.js';
+import { ControllerRuntime } from './controller-runtime.js';
+import { setupControllerUI } from './controller-ui.js';
 import { getSplatBounds } from './splat-bounds.js';
-import { createAvatar } from './avatar.js';
 import { createMonitoring } from './monitoring.js';
 import { downloadScene, describeLoadError } from './scene-download.js';
 import { defaultScene } from './default-scene.js';
 import './style.css';
+
+// Do not top-level await: Rollup's shared Worker chunk can depend on this module.
+async function start() {
 
 const $ = id => document.getElementById(id);
 const status = (message, error = false) => { $('status').textContent = message; $('status').classList.toggle('error', error); };
@@ -32,20 +36,63 @@ scene.add(light);
 const grid = new THREE.GridHelper(200, 200, 0x4b6652, 0x263a30);
 grid.material.transparent = true;
 grid.material.opacity = 0.42;
+grid.visible = $('grid').checked;
 scene.add(grid);
 const orbit = new OrbitControls(camera, renderer.domElement);
 orbit.enableDamping = true;
-const player = new Player();
-const keys = new Set();
 const spawn = new THREE.Vector3(0, 0, 5);
-const character = createAvatar();
-const avatar = character.root;
-avatar.visible = false;
-scene.add(avatar);
 let mode = 'orbit', model = null, localBounds = null, loadSequence = 0, bundledModel = false;
-let roaming = false, dragLook = false;
+let collisionWorld = null, sceneLoading = true, collisionLoading = false;
+let roaming = false;
 let bounds = new THREE.Box3(new THREE.Vector3(-8, 0, -8), new THREE.Vector3(8, 4, 8));
 const demo = new THREE.Group();
+const runtime = new ControllerRuntime({ scene, camera, controls: orbit, renderer, status, onView(next) { if (runtime.active) { mode = next; syncModeUI(); } } });
+await runtime.init();
+const player = runtime.controller;
+updateCollisionUI();
+function canRoam() { return !sceneLoading && (!bundledModel || Boolean(collisionWorld)); }
+function updateCollisionUI() {
+  $('ground').disabled = Boolean(collisionWorld) || (bundledModel && collisionLoading);
+  $('collision-note').textContent = collisionWorld
+    ? '施工区地形碰撞已启用 · 碰撞网格不可见。支持地形、胶囊碰撞、跳跃与物理交互。'
+    : sceneLoading ? '正在准备场景和地形碰撞…'
+      : bundledModel ? (collisionLoading ? '正在准备施工区地形碰撞…' : '碰撞网格未就绪，暂时无法进入漫游。')
+      : '此场景使用可调平面地面，未配置专属碰撞网格。';
+  document.querySelectorAll('[data-mode]').forEach(button => { button.disabled = button.dataset.mode !== 'orbit' && !canRoam(); });
+}
+async function loadCollision(sequence) {
+  collisionLoading = true;
+  $('retry-collision').hidden = true;
+  updateCollisionUI();
+  try {
+    const base = `${import.meta.env.BASE_URL}collision/`;
+    const response = await fetch(`${base}report.json`, { cache: 'no-cache' });
+    if (!response.ok) throw new Error('缺少碰撞网格信息');
+    const report = await response.json();
+    if (report.source_sha256 !== defaultScene.version) throw new Error('碰撞网格与场景版本不匹配');
+    const gltf = await new GLTFLoader().loadAsync(`${base}scene-collider.glb`);
+    try {
+      if (sequence !== loadSequence) return;
+      collisionWorld = await runtime.setSceneCollision(gltf.scene, model.matrixWorld, { signal: activeDownload?.signal });
+      resetPlayer();
+      status('场景已就绪 · 地形碰撞已启用，可进入第一或第三人称漫游');
+    } finally {
+      gltf.scene.traverse(object => {
+        object.geometry?.dispose();
+        if (Array.isArray(object.material)) object.material.forEach(material => material.dispose());
+        else object.material?.dispose();
+      });
+    }
+  } catch (error) {
+    if (sequence !== loadSequence) return;
+    status(`碰撞加载失败：${describeLoadError(error)}`, true);
+    $('retry-collision').hidden = false;
+    console.error(error);
+  } finally {
+    if (sequence === loadSequence) { collisionLoading = false; updateCollisionUI(); }
+  }
+}
+$('retry-collision').addEventListener('click', () => loadCollision(loadSequence));
 scene.add(demo);
 function makeDemo() {
   for (let i = 0; i < 18; i++) {
@@ -63,15 +110,14 @@ makeDemo();
 const monitoring = createMonitoring({
   onOpen() {
     roaming = false;
-    dragLook = false;
-    keys.clear();
-    player.velocity.set(0, 0, 0);
+    runtime.releaseInput?.();
+    player.getVelocity().set(0, 0, 0);
     document.exitPointerLock?.();
     orbit.enabled = false;
     $('enter').hidden = true;
   },
   onClose() {
-    orbit.enabled = mode === 'orbit';
+    orbit.enabled = mode !== 'first';
     $('enter').hidden = mode === 'orbit';
   },
 });
@@ -89,100 +135,48 @@ function frameScene() {
   orbit.update();
 }
 function resetPlayer() {
-  player.reset(spawn);
-  player.yaw = 0;
-  player.pitch = 0;
-  updatePlayerCamera(true);
+  runtime.spawn.copy(spawn);
+  runtime.reset(spawn);
+  if (mode !== 'orbit') player.cam.setCamPos();
 }
-function updatePlayerCamera(immediate = false, dt = 1 / 60) {
-  if (mode === 'orbit') return;
-  const eye = player.position.clone().add(new THREE.Vector3(0, player.eyeHeight, 0));
-  const rotation = new THREE.Euler(player.pitch, player.yaw, 0, 'YXZ');
-  const offset = mode === 'third' ? new THREE.Vector3(0, 0.4, Number($('distance').value)).applyEuler(rotation) : new THREE.Vector3();
-  const target = eye.clone().add(offset);
-  if (immediate || mode === 'first') camera.position.copy(target);
-  else camera.position.lerp(target, 1 - Math.exp(-12 * dt));
-  camera.position.y = Math.max(player.ground + 0.15, camera.position.y);
-  camera.quaternion.setFromEuler(rotation);
-  avatar.position.copy(player.position);
-  avatar.rotation.y = player.yaw;
-}
-function setMode(next) {
-  const old = mode;
-  mode = next;
-  keys.clear();
-  orbit.enabled = mode === 'orbit';
-  avatar.visible = mode === 'third';
+function syncModeUI() {
   $('crosshair').hidden = mode !== 'first';
   $('enter').hidden = mode === 'orbit' || roaming;
-  const labels = { orbit: '自由浏览', first: '第一人称', third: '第三人称' };
-  $('mode-label').textContent = labels[mode];
+  $('mode-label').textContent = { orbit: '自由浏览', first: '第一人称', third: '第三人称' }[mode];
   document.querySelectorAll('[data-mode]').forEach(button => {
     button.classList.toggle('active', button.dataset.mode === mode);
     button.setAttribute('aria-pressed', String(button.dataset.mode === mode));
   });
-  $('controls').innerHTML = mode === 'orbit' ? '左键旋转 <i>·</i> 右键平移 <i>·</i> 滚轮缩放' : 'W A S D 移动 <i>·</i> Shift 加速 <i>·</i> 空格跳跃 <i>·</i> V 视角 <i>·</i> E 查看监控';
-  if (mode === 'orbit') {
-    roaming = false;
-    document.exitPointerLock?.();
-    if (old !== 'orbit') {
-      orbit.target.copy(player.position).add(new THREE.Vector3(0, 1, 0));
-      camera.position.add(new THREE.Vector3(3, 3, 5));
-      orbit.update();
-    }
-  } else updatePlayerCamera(true);
+  $('controls').textContent = mode === 'orbit' ? '左键旋转 · 右键平移 · 滚轮缩放' : 'WASD 移动 · Shift 奔跑 / 手刹 · 空格跳跃 / 刹车 · V 视角 · F 飞行 · E 上下车 · Q 监控';
 }
-async function lockPointer() {
-  if (monitoring.isOpen || mode === 'orbit' || roaming) return;
-  renderer.domElement.focus();
-  try { await renderer.domElement.requestPointerLock(); }
-  catch { enableDragControls(); }
+function setMode(next) {
+  if (next !== 'orbit' && !canRoam()) return;
+  mode = next;
+  runtime.setMode(next);
+  if (next === 'orbit') { roaming = false; document.exitPointerLock?.(); }
+  else { roaming = true; player.cam.setCamPos(); renderer.domElement.focus(); }
+  syncModeUI();
 }
-function enableDragControls() {
-  if (monitoring.isOpen || mode === 'orbit') return;
+function enterRoaming() {
+  if (!canRoam() || monitoring.isOpen || mode === 'orbit') return;
   roaming = true;
+  orbit.enabled = mode !== 'first';
+  renderer.domElement.focus();
   $('enter').hidden = true;
-  status('漫游已开启 · WASD 移动，按住鼠标拖动转向，Esc 退出');
 }
 document.querySelectorAll('[data-mode]').forEach(button => button.addEventListener('click', () => setMode(button.dataset.mode)));
-$('enter').addEventListener('click', lockPointer);
-renderer.domElement.addEventListener('click', () => {
-  if (document.pointerLockElement === renderer.domElement && monitoring.openCentered()) return;
-  lockPointer();
-});
-document.addEventListener('pointerlockchange', () => {
-  keys.clear();
-  roaming = document.pointerLockElement === renderer.domElement;
-  $('enter').hidden = monitoring.isOpen || mode === 'orbit' || roaming;
-});
-document.addEventListener('pointerlockerror', enableDragControls);
-renderer.domElement.addEventListener('mousedown', () => { dragLook = true; });
-window.addEventListener('mouseup', () => { dragLook = false; });
-document.addEventListener('mousemove', event => { if (roaming && (document.pointerLockElement === renderer.domElement || dragLook)) player.look(event.movementX, event.movementY); });
-window.addEventListener('keydown', event => {
-  if (monitoring.isOpen) return;
-  if (event.code === 'Escape') { roaming = false; dragLook = false; keys.clear(); $('enter').hidden = mode === 'orbit'; }
-  if (['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON'].includes(event.target.tagName)) return;
-  if (event.code === 'KeyE' && !event.repeat && monitoring.openCentered()) { event.preventDefault(); return; }
-  if (event.code === 'KeyV' && !event.repeat) {
-    setMode(mode === 'first' ? 'third' : 'first');
-    return;
-  }
-  if (!roaming || mode === 'orbit') return;
-  if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight'].includes(event.code)) event.preventDefault();
-  keys.add(event.code);
-  if (event.code === 'Space' && !event.repeat) player.jump();
-});
-window.addEventListener('keyup', event => keys.delete(event.code));
-window.addEventListener('blur', () => { keys.clear(); dragLook = false; });
-document.addEventListener('visibilitychange', () => keys.clear());
-$('speed').addEventListener('input', () => { player.speed = Number($('speed').value); $('speed-value').textContent = `${player.speed.toFixed(1)} m/s`; });
-$('distance').addEventListener('input', () => { $('distance-value').textContent = `${Number($('distance').value).toFixed(1)} m`; });
+$('enter').textContent = '继续漫游';
+$('enter').addEventListener('click', enterRoaming);
+const controllerUI = setupControllerUI({runtime,canControl:canRoam,enter:enterRoaming,getMode:()=>mode,setMode,status,monitoring});
+$('speed').addEventListener('input', () => { const speed=Number($('speed').value); player.setPlayerSpeed(speed*100); player.setPlayerRunSpeed(speed*100*2.16); $('speed-value').textContent = `${speed.toFixed(1)} m/s`; });
+$('distance').addEventListener('input', () => { const distance=Number($('distance').value); player.setMaxCamDistance(distance*100); $('distance-value').textContent = `${distance.toFixed(1)} m`; });
 $('grid').addEventListener('change', () => { grid.visible = $('grid').checked; });
 $('ground').addEventListener('change', () => {
+  if (collisionWorld) return;
   const value = Number($('ground').value);
   if (!Number.isFinite(value)) return;
-  player.ground = value;
+  spawn.y = value;
+  runtime.setFlatGround(value).catch(error => status(error.message, true));
   grid.position.y = value;
   resetPlayer();
 });
@@ -210,9 +204,9 @@ function transformModel() {
   spawn.set(0, 0, Math.min(size.z * 0.25, 5));
   // Source-space ground estimate near the origin of the user's supplied survey scene.
   if (bundledModel) spawn.set(0, 0, 2.5).applyMatrix4(model.matrixWorld);
-  player.ground = spawn.y;
-  $('ground').value = player.ground.toFixed(2);
-  grid.position.y = player.ground;
+  $('ground').value = spawn.y.toFixed(2);
+  grid.position.y = spawn.y;
+  if (collisionWorld && bundledModel) { collisionWorld = null; setMode('orbit'); loadCollision(loadSequence); }
   resetPlayer();
   if (mode === 'orbit') {
     frameScene();
@@ -239,10 +233,14 @@ async function loadScene(request) {
   activeDownload = download;
   $('retry-load').hidden = true;
   const sequence = ++loadSequence;
+  sceneLoading = true;
+  $('retry-collision').hidden = true;
+  setMode('orbit');
+  updateCollisionUI();
   name ||= file?.name || 'scene.ply';
   document.exitPointerLock?.();
   roaming = false;
-  keys.clear();
+  runtime.releaseInput?.();
   status(`正在读取 ${name}…`);
   let candidate;
   try {
@@ -291,6 +289,8 @@ async function loadScene(request) {
     const candidateBounds = candidate instanceof SplatMesh ? getSplatBounds(candidate) : candidate.geometry.boundingBox.clone();
     if (candidateBounds.isEmpty() || ![...candidateBounds.min, ...candidateBounds.max].every(Number.isFinite)) throw new Error('模型没有可显示的有效坐标。');
     if (model) disposeModel(model);
+    runtime.clearScene();
+    collisionWorld = null;
     model = candidate;
     bundledModel = Boolean(url);
     localBounds = candidateBounds;
@@ -305,13 +305,18 @@ async function loadScene(request) {
     $('file-type').textContent = { gaussian: '3DGS', mesh: 'MESH', points: 'POINT CLOUD' }[info.type];
     const count = info.vertices ?? candidate.numSplats ?? candidate.splats?.getNumSplats();
     $('count').textContent = count ? `${count.toLocaleString()} ${info.type === 'gaussian' ? '高斯点' : '顶点'}` : '场景已加载';
-    status('场景已就绪 · 可调整向上轴与地面高度，再进入漫游');
+    if (bundledModel) {
+      status('场景已加载 · 正在准备隐藏碰撞网格…');
+      await loadCollision(sequence);
+    } else { await runtime.setFlatGround(spawn.y); status('场景已就绪 · 当前使用平面地面'); }
   } catch (error) {
     if (candidate && candidate !== model) disposeModel(candidate);
     if (sequence !== loadSequence || download.signal.aborted) return;
     status(`加载失败：${describeLoadError(error)}`, true);
     $('retry-load').hidden = false;
     console.error(error);
+  } finally {
+    if (sequence === loadSequence) { sceneLoading = false; updateCollisionUI(); }
   }
 }
 $('retry-load').addEventListener('click', () => { if (lastLoadRequest) loadScene(lastLoadRequest); });
@@ -329,16 +334,27 @@ renderer.setAnimationLoop(time => {
   const dt = Math.min((time - previous) / 1000 || 0, 0.05);
   previous = time;
   if (!monitoring.isOpen && mode === 'orbit') orbit.update();
-  else if (!monitoring.isOpen) {
-    if (roaming) player.update(dt, keys);
-    updatePlayerCamera(false, dt);
-  }
-  character.animate(dt, roaming ? Math.hypot(player.velocity.x, player.velocity.z) : 0, player.grounded);
+  runtime.update(dt, monitoring.isOpen || !roaming);
+  controllerUI.update();
+  $('motion-state').hidden = mode === 'orbit';
+  if (mode !== 'orbit') $('motion-state').textContent = `${player.getIsFlying() ? '飞行' : player.getIsOnGround() ? '贴地' : '空中'} · 高度 ${runtime.feet.y.toFixed(2)} m`;
   monitoring.update(camera, innerWidth, innerHeight);
   if (!monitoring.renderPreview(renderer, scene, time)) renderer.render(scene, camera);
   frames++;
   if (time - fpsStart > 1000) { $('fps').textContent = `${Math.round(frames * 1000 / (time - fpsStart))} FPS`; fpsStart = time; frames = 0; }
 });
+await runtime.setFlatGround(0, demo);
+sceneLoading = false;
+runtime.setMode('orbit');
 resetPlayer();
 frameScene();
+updateCollisionUI();
 if (!new URLSearchParams(location.search).has('demo')) loadScene({ ...defaultScene, url: `${import.meta.env.BASE_URL}scene.ply?v=${defaultScene.version}` });
+
+}
+start().catch(error => {
+  console.error(error);
+  const output = document.getElementById('status');
+  output.textContent = `初始化失败：${describeLoadError(error)}`;
+  output.classList.add('error');
+});

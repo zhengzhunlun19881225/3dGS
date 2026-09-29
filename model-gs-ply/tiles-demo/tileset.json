@@ -1,0 +1,90 @@
+{
+  "asset": {
+    "version": "1.1"
+  },
+  "geometricError": 30,
+  "root": {
+    "transform": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      6.123233995736766e-17,
+      -1,
+      0,
+      0,
+      1,
+      6.123233995736766e-17,
+      0,
+      0,
+      0,
+      0,
+      1
+    ],
+    "boundingVolume": {
+      "box": [
+        10,
+        0,
+        1,
+        8,
+        0,
+        0,
+        0,
+        4,
+        0,
+        0,
+        0,
+        1
+      ]
+    },
+    "geometricError": 20,
+    "refine": "ADD",
+    "children": [
+      {
+        "boundingVolume": {
+          "box": [
+            6,
+            0,
+            1,
+            4,
+            0,
+            0,
+            0,
+            4,
+            0,
+            0,
+            0,
+            1
+          ]
+        },
+        "geometricError": 0,
+        "content": {
+          "uri": "tile-0.gltf"
+        }
+      },
+      {
+        "boundingVolume": {
+          "box": [
+            14,
+            0,
+            1,
+            4,
+            0,
+            0,
+            0,
+            4,
+            0,
+            0,
+            0,
+            1
+          ]
+        },
+        "geometricError": 0,
+        "content": {
+          "uri": "tile-1.gltf"
+        }
+      }
+    ]
+  }
+}

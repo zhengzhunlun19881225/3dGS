@@ -2,6 +2,9 @@ node_modules/
 dist/
 .pnpm-store/
 .DS_Store
+.venv-collider/
+.venv-collider312/
+__pycache__/
 *.ply
 *.splat
 *.spz

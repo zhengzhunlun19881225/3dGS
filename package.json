@@ -10,8 +10,13 @@
     "test": "node --test tests/*.test.js"
   },
   "dependencies": {
+    "3d-tiles-renderer": "^0.5.3",
     "@sparkjsdev/spark": "2.2.0",
-    "three": "0.180.0"
+    "three": "0.180.0",
+    "three-mesh-bvh": "0.9.1",
+    "three-player-controller": "^0.6.2"
   },
-  "devDependencies": { "vite": "^7.1.0" }
+  "devDependencies": {
+    "vite": "^7.1.0"
+  }
 }
