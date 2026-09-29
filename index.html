@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><meta name="theme-color" content="#111717"/><title>PLY · 场景漫游</title></head>
+<body>
+  <main id="viewport" aria-label="三维场景"></main>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="场景漫游首页"><span class="brand-icon">◈</span><strong>PLY<span>EXPLORER</span></strong></a>
+    <div class="project-label"><span class="live-dot"></span><span id="scene-name">漫游试验场</span><span class="tag" id="file-type">DEMO</span></div>
+    <button id="import-button" class="primary">＋ 导入场景</button>
+    <input id="file-input" type="file" accept=".ply,.spz,.splat,.ksplat" hidden/>
+  </header>
+  <aside class="panel">
+    <div class="eyebrow">SCENE WORKSPACE <span>01</span></div>
+    <h1>走进你的场景<span>从一个新的视角。</span></h1>
+    <p class="intro">拖入 PLY 文件，在浏览与漫游之间自由切换。</p>
+    <div class="section-label">视角模式 <span>按 V 切换</span></div>
+    <div class="modes" role="group" aria-label="视角模式">
+      <button data-mode="orbit" class="active" aria-pressed="true"><span>◎</span>自由浏览</button>
+      <button data-mode="first" aria-pressed="false"><span>⌖</span>第一人称</button>
+      <button data-mode="third" aria-pressed="false"><span>♙</span>第三人称</button>
+    </div>
+    <div class="divider"></div>
+    <div class="section-label">漫游设置 <span>WORLD</span></div>
+    <label class="range-label" for="speed">移动速度 <output id="speed-value">3.0 m/s</output></label>
+    <input id="speed" type="range" min="0.5" max="15" value="3" step="0.5"/>
+    <label class="range-label" for="distance">跟随距离 <output id="distance-value">4.0 m</output></label>
+    <input id="distance" type="range" min="1" max="12" value="4" step="0.5"/>
+    <div class="field-row"><label for="ground">地面高度</label><input id="ground" type="number" value="0" step="0.1"/></div>
+    <div class="field-row"><label for="scale">模型缩放</label><input id="scale" type="number" value="1" min="0.0001" max="10000" step="0.1"/></div>
+    <div class="field-row"><label for="up-axis">模型向上轴</label><select id="up-axis"><option value="y">+Y</option><option value="-y">−Y（3DGS 常见）</option><option value="z">+Z</option><option value="-z">−Z</option></select></div>
+    <label class="switch-row"><span>显示辅助网格</span><input id="grid" type="checkbox" checked/></label>
+    <div class="action-row"><button id="frame">全景定位</button><button id="respawn">重置玩家</button></div>
+    <div class="note"><span>ⓘ</span><p>使用可调平面地面。点云与高斯场景暂无墙体碰撞。</p></div>
+    <div class="local-note">◌ 文件在本机解析，无需上传</div>
+  </aside>
+  <div class="view-label"><span class="live-dot"></span><span id="mode-label">自由浏览</span><span class="muted">/</span><span class="muted">PERSPECTIVE</span></div>
+  <div id="crosshair" hidden>+</div>
+  <button id="enter" class="enter" hidden>点击进入漫游 <span>ESC 释放鼠标</span></button>
+  <div class="bottom-bar"><div class="controls" id="controls">左键旋转 <i>·</i> 右键平移 <i>·</i> 滚轮缩放</div><div class="stats"><span id="count">示例场景</span><span id="fps">— FPS</span></div></div>
+  <div id="status" role="status" aria-live="polite">准备就绪 · 可拖入 .ply 文件</div>
+  <div id="drop-zone" hidden><div>放开以打开场景<small>PLY / SPZ / SPLAT / KSPLAT</small></div></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
