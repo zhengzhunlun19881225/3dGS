@@ -9,10 +9,6 @@ export function createMonitoring({ onOpen, onClose }) {
   layer.className = 'monitor-markers';
   layer.setAttribute('aria-label', '场景监控点位');
   document.body.appendChild(layer);
-  const dock = document.createElement('aside');
-  dock.className = 'monitor-dock';
-  dock.innerHTML = '<div class="monitor-dock-title"><span>场景监控</span><span>03 点位</span></div><div class="monitor-list"></div><p>点击场景图标查看画面</p>';
-  document.body.appendChild(dock);
   const dialog = document.createElement('dialog');
   dialog.className = 'monitor-dialog';
   dialog.setAttribute('aria-labelledby', 'monitor-title');
@@ -34,15 +30,12 @@ export function createMonitoring({ onOpen, onClose }) {
     marker.innerHTML = `<span class="monitor-pin">${cameraIcon}</span><span class="monitor-pin-label">${config.id.slice(-2)} · ${config.name}</span><span class="monitor-stem"></span>`;
     marker.hidden = true;
     layer.appendChild(marker);
-    const listButton = document.createElement('button');
-    listButton.innerHTML = `${cameraIcon}<span>${config.name}</span><small>${config.videoUrl ? '视频' : '演示'}</small>`;
-    dock.querySelector('.monitor-list').appendChild(listButton);
     const switchButton = document.createElement('button');
     switchButton.textContent = config.id;
     switchButton.setAttribute('aria-label', `切换到${config.name}`);
     dialog.querySelector('nav').appendChild(switchButton);
-    const entry = { config, marker, listButton, switchButton, position: new THREE.Vector3(), target: new THREE.Vector3(), screen: new THREE.Vector3(), index };
-    for (const button of [marker, listButton, switchButton]) button.addEventListener('click', () => open(entry));
+    const entry = { config, marker, switchButton, position: new THREE.Vector3(), target: new THREE.Vector3(), screen: new THREE.Vector3(), index };
+    for (const button of [marker, switchButton]) button.addEventListener('click', () => open(entry));
     return entry;
   });
 
@@ -101,7 +94,6 @@ export function createMonitoring({ onOpen, onClose }) {
     // Call after scene transforms so markers stay attached to source-space points.
     setScene(model, bundled) {
       enabled = !model || bundled;
-      dock.hidden = !enabled;
       layer.hidden = !enabled;
       if (dialog.open) dialog.close();
       entries.forEach(entry => {
@@ -138,7 +130,7 @@ export function createMonitoring({ onOpen, onClose }) {
       open(entry);
       return true;
     },
-    renderPreview(renderer, scene, time) {
+    renderPreview(renderer, scene, time, beforeRender) {
       if (!dialog.open || !selected) return false;
       if (Math.floor(time / 1000) !== lastSecond) {
         lastSecond = Math.floor(time / 1000);
@@ -151,6 +143,7 @@ export function createMonitoring({ onOpen, onClose }) {
         lastFrame = time;
         feedCamera.lookAt(selected.target);
         feedCamera.rotateY(Math.sin(time * 0.00015) * 0.12);
+        beforeRender?.(feedCamera);
         renderer.render(scene, feedCamera);
         ctx.drawImage(renderer.domElement, 0, 0, preview.width, preview.height);
       }

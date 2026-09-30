@@ -1,7 +1,8 @@
 import * as T from 'three';
 import { playerController } from 'three-player-controller';
 import { FootIK } from 'three-player-controller/foot-ik';
-import { createControllerCharacter,createVehicleModel } from './controller-assets.js';
+import { createVehicleModel } from './controller-assets.js';
+import { loadSciFiCharacter } from './scifi-character.js';
 import { StreamingColliders } from './streaming-colliders.js';
 
 export const defaultKeys={forward:'KeyW',backward:'KeyS',left:'KeyA',right:'KeyD',sprint:'ShiftLeft',jump:'Space',toggleView:'KeyV',toggleFly:'KeyF',toggleVehicle:'KeyE'};
@@ -18,9 +19,9 @@ export async function waitForCollider(controller,handle,{signal,timeout=30000}={
 }
 export class ControllerRuntime {
   constructor({scene,camera,controls,renderer,status,onView}){Object.assign(this,{scene,camera,controls,renderer,status,onView});this.controller=new playerController();this.props=[];this.platforms=[];this.sceneHandles=[];this.spawn=new T.Vector3();this.safe=new T.Vector3();this.elapsed=0;this.active=false;this.revision=0;}
-  async init(){
-    const asset=createControllerCharacter();
-    await this.controller.init({scene:this.scene,camera:this.camera,controls:this.controls,initPos:new T.Vector3(0,2,5),playerModelConfig:{...asset,scale:.01,idleAnim:'Idle',walkAnim:'Walk',runAnim:'Run',jumpAnim:'Jump',flyIdleAnim:'Hover',flyAnim:'Fly',drivingAnim:'Drive',headBoneName:'Head',firstPersonCameraOffset:[0,.015,.20],gravity:-1400,jumpHeight:520,speed:300,runSpeed:650,flySpeed:800},minCamDistance:5,maxCamDistance:400,thirdMouseMode:4,enableZoom:true,enableOverShoulderView:true,camOverShoulderOffsetRatio:.08,enableSpringCamera:true,springCameraTime:.12,isShowMobileControls:false});
+  async init({character}={}){
+    const asset=character??await loadSciFiCharacter(`${import.meta.env.BASE_URL}characters/Xbot.glb`);
+    await this.controller.init({scene:this.scene,camera:this.camera,controls:this.controls,initPos:new T.Vector3(0,2,5),playerModelConfig:{...asset,scale:.01,idleAnim:'Idle',walkAnim:'Walk',runAnim:'Run',jumpAnim:'Jump',flyIdleAnim:'Hover',flyAnim:'Fly',drivingAnim:'Drive',headBoneName:'Head',gravity:-1400,jumpHeight:520,speed:300,runSpeed:650,flySpeed:800},minCamDistance:5,maxCamDistance:400,thirdMouseMode:4,enableZoom:true,enableOverShoulderView:true,camOverShoulderOffsetRatio:.08,enableSpringCamera:true,springCameraTime:.12,isShowMobileControls:false});
     // Own input focus/lifecycle: upstream global key listeners also fire in text fields.
     this.controller.offAllEvent();this.controller.isupdate=true;
     // Snap obstruction correction immediately; spring smoothing still follows the target.
@@ -35,10 +36,10 @@ export class ControllerRuntime {
       catch{this.status('第一人称已开启 · 按住鼠标拖动转向');}
     };
     this.controller.onViewChange=first=>this.onView?.(first?'first':'third');
-    this.ik=new FootIK({skeleton:{hips:'Hips',legs:{left:{upper:'LeftUpLeg',lower:'LeftLeg',foot:'LeftFoot',toe:'LeftToe'},right:{upper:'RightUpLeg',lower:'RightLeg',foot:'RightFoot',toe:'RightToe'}}},soleSkinThickness:9,maxFootRaise:35,maxFootDrop:35,maxPelvisDrop:25,maxPelvisRaise:20,predictivePlacement:true,straightPoleEnabled:true,plantedHeightSpeed:200,penetrationLiftSpeed:200});
+    this.ik=new FootIK({skeleton:{hips:'Hips',legs:{left:{upper:'LeftUpLeg',lower:'LeftLeg',foot:'LeftFoot',toe:'LeftToe'},right:{upper:'RightUpLeg',lower:'RightLeg',foot:'RightFoot',toe:'RightToe'}}},soleSkinThickness:1,maxFootRaise:35,maxFootDrop:35,maxPelvisDrop:25,maxPelvisRaise:20,predictivePlacement:true,straightPoleEnabled:true,plantedHeightSpeed:200,penetrationLiftSpeed:200});
     this.controller.use(this.ik);
     this.controller.registerAnimation('wave','Wave',{loop:false,clampWhenFinished:true});
-    this.controller.registerLocomotionSet('careful',{idle:'Idle',walking:'Careful',walking_backward:'Careful',running:'Run',jumping:'Jump',flyidle:'Hover',flying:'Fly'});
+    this.controller.registerLocomotionSet('careful',{idle:'CarefulIdle',walking:'Careful',walking_backward:'Careful',running:'CarefulRun',jumping:'CarefulJump',flyidle:'CarefulHover',flying:'CarefulFly'});
     this.controller.setColliderDebug(false);this.controller.setPlayerCapsuleDebug(false);
     this.controller.setDynamicBodyDebug(false);this.controller.setVehiclePhysicsDebug(false);
     this.controller.getPlayerModel().visible=false;

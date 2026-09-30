@@ -28,16 +28,52 @@
     <button id="import-button" class="primary">＋ 导入场景</button>
     <input id="file-input" type="file" accept=".ply,.spz,.splat,.ksplat" hidden/>
   </header>
-  <aside class="panel">
-    <div class="eyebrow">SCENE WORKSPACE <span>01</span></div>
-    <h1>走进你的场景<span>从一个新的视角。</span></h1>
-    <p class="intro">拖入 PLY 文件，在浏览与漫游之间自由切换。</p>
+  <button id="panel-toggle" class="panel-toggle" type="button" aria-controls="scene-panel" aria-expanded="true" aria-label="收起控制面板" title="收起控制面板"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg><span hidden>展开</span></button>
+  <aside id="scene-panel" class="panel" aria-label="场景控制面板">
     <div class="section-label">视角模式 <span>按 V 切换</span></div>
     <div class="modes" role="group" aria-label="视角模式">
       <button data-mode="orbit" class="active" aria-pressed="true"><span>◎</span>自由浏览</button>
       <button data-mode="first" aria-pressed="false"><span>⌖</span>第一人称</button>
       <button data-mode="third" aria-pressed="false"><span>♙</span>第三人称</button>
     </div>
+    <section class="time-panel" aria-label="时间模拟器">
+      <div class="section-label">时间模拟器 <span id="time-phase">上午</span></div>
+      <div class="time-heading"><label for="time-hour">大气天空 · 场景时间</label><output id="time-value" for="time-hour">08:00</output></div>
+      <div class="sky-settings"><label>天空<select id="sky-engine"><option value="volumetric" selected>体积云</option><option value="lightweight">轻量云</option></select></label><label>画质<select id="sky-quality"><option value="low">流畅</option><option value="balanced" selected>均衡</option><option value="high">精细</option></select></label></div>
+      <p id="sky-status" class="time-note" role="status">正在生成三维云层…</p>
+      <input id="time-hour" type="range" min="0" max="24" step="0.05" value="8" aria-label="场景时间"/>
+      <div class="time-ticks" aria-hidden="true"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
+      <div class="time-presets"><button data-hour="6" aria-pressed="false">日出</button><button data-hour="12" aria-pressed="false">正午</button><button data-hour="18" aria-pressed="false">日落</button><button data-hour="22" aria-pressed="false">夜晚</button></div>
+      <div class="time-play-row"><button id="time-play" aria-pressed="false">▶ 自动播放</button><label for="time-duration">一天 /</label><select id="time-duration"><option value="1">1 分钟</option><option value="3" selected>3 分钟</option><option value="10">10 分钟</option></select></div>
+      <div class="time-caption"><span id="sun-altitude">太阳高度 30°</span><button id="time-reset">恢复 08:00</button></div>
+      <section class="weather-panel" aria-label="天气控制器">
+        <div class="section-label">天气控制器 <span>WEATHER</span></div>
+        <label class="weather-select-label" for="weather-preset">天气预设<select id="weather-preset"></select></label>
+        <div class="weather-presets"><button data-weather="clear" aria-pressed="false">☀ 晴朗</button><button data-weather="rain" aria-pressed="false">☂ 下雨</button><button data-weather="snow" aria-pressed="false">❄ 降雪</button><button data-weather="storm" aria-pressed="false">ϟ 雷暴</button></div>
+        <label class="range-label" for="weather-intensity">天气强度 <output id="weather-intensity-value">100%</output></label>
+        <input id="weather-intensity" type="range" min="0" max="1.5" step="0.05" value="1"/>
+      <div class="weather-controls">
+        <label for="cloud-cover">云量<input id="cloud-cover" type="range" min="0" max="1" step="0.05" value="0.6"/></label>
+        <label for="cloud-speed">风力 <output id="wind-speed-value">4.0 m/s</output><input id="cloud-speed" type="range" min="0" max="3" step="0.1" value="1"/></label>
+      </div>
+        <label class="range-label" for="wind-direction">风向 <output id="wind-direction-value">25°</output></label>
+        <input id="wind-direction" type="range" min="0" max="360" step="5" value="25"/>
+        <div class="weather-settings"><label>过渡<select id="weather-transition"><option value="1">1 秒</option><option value="3" selected>3 秒</option><option value="8">8 秒</option></select></label><label><input id="weather-lightning" type="checkbox" checked/> 闪电</label></div>
+        <div class="weather-settings"><label><input id="weather-auto" type="checkbox"/> 自动天气</label><select id="weather-interval" aria-label="自动天气间隔"><option value="30">每 30 秒</option><option value="60" selected>每 1 分钟</option><option value="180">每 3 分钟</option></select><button id="weather-reset">恢复晴朗</button></div>
+        <p id="weather-status" class="weather-status" role="status">多云</p>
+        <div class="surface-controls">
+          <div class="time-caption"><span>地面雨雪</span><button id="surface-clear">清空地表</button></div>
+          <label class="range-label" for="surface-wetness">湿润 / 水洼 <output id="surface-wetness-value">0%</output></label>
+          <input id="surface-wetness" type="range" min="0" max="1" step="0.01" value="0"/>
+          <label class="range-label" for="surface-snow">积雪覆盖 <output id="surface-snow-value">0%</output></label>
+          <input id="surface-snow" type="range" min="0" max="1" step="0.01" value="0"/>
+          <p id="surface-source" class="time-note">正在准备地表…</p>
+        </div>
+      </section>
+      <div class="sky-actions"><button id="sky-view">☀ 查看太阳</button><button id="sky-return">返回场景</button></div>
+      <p class="time-note">时间暂停时，云仍随风移动。风速调至 0 可暂停云层。</p>
+      <p class="time-note">高斯场景采用整体色调模拟，原始照片中的光影仍会保留。</p>
+    </section>
     <div class="divider"></div>
     <div class="section-label">漫游设置 <span>WORLD</span></div>
     <label class="range-label" for="speed">移动速度 <output id="speed-value">3.0 m/s</output></label>

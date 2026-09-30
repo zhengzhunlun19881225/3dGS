@@ -10,7 +10,20 @@ import { getSplatBounds } from './splat-bounds.js';
 import { createMonitoring } from './monitoring.js';
 import { downloadScene, describeLoadError } from './scene-download.js';
 import { defaultScene } from './default-scene.js';
+import { createTimeSimulator } from './time-simulator.js';
 import './style.css';
+
+const scenePanel = document.getElementById('scene-panel');
+const panelToggle = document.getElementById('panel-toggle');
+panelToggle.addEventListener('click', () => {
+  const collapsed = !scenePanel.hidden;
+  scenePanel.hidden = collapsed;
+  document.body.classList.toggle('panel-collapsed', collapsed);
+  panelToggle.setAttribute('aria-expanded', String(!collapsed));
+  panelToggle.setAttribute('aria-label', collapsed ? '展开控制面板' : '收起控制面板');
+  panelToggle.title = collapsed ? '展开控制面板' : '收起控制面板';
+  panelToggle.querySelector('span').hidden = !collapsed;
+});
 
 // Do not top-level await: Rollup's shared Worker chunk can depend on this module.
 async function start() {
@@ -29,10 +42,7 @@ renderer.domElement.tabIndex = 0;
 $('viewport').appendChild(renderer.domElement);
 const spark = new SparkRenderer({ renderer, lodSplatCount: 1000000 });
 scene.add(spark);
-scene.add(new THREE.HemisphereLight(0xd6eee3, 0x28372b, 3));
-const light = new THREE.DirectionalLight(0xffeccd, 3);
-light.position.set(8, 15, 4);
-scene.add(light);
+const timeSimulator = await createTimeSimulator(scene,renderer);
 const grid = new THREE.GridHelper(200, 200, 0x4b6652, 0x263a30);
 grid.material.transparent = true;
 grid.material.opacity = 0.42;
@@ -74,6 +84,7 @@ async function loadCollision(sequence) {
     try {
       if (sequence !== loadSequence) return;
       collisionWorld = await runtime.setSceneCollision(gltf.scene, model.matrixWorld, { signal: activeDownload?.signal });
+      timeSimulator.setTerrain(gltf.scene,model.matrixWorld.clone().multiply(new THREE.Matrix4().makeRotationX(Math.PI/2)));
       resetPlayer();
       status('场景已就绪 · 地形碰撞已启用，可进入第一或第三人称漫游');
     } finally {
@@ -95,6 +106,8 @@ async function loadCollision(sequence) {
 $('retry-collision').addEventListener('click', () => loadCollision(loadSequence));
 scene.add(demo);
 function makeDemo() {
+  const floor=new THREE.Mesh(new THREE.PlaneGeometry(200,200),new THREE.MeshStandardMaterial({color:'#697365',roughness:.95}));
+  floor.name='Demo weather ground';floor.rotation.x=-Math.PI/2;demo.add(floor);
   for (let i = 0; i < 18; i++) {
     const angle = i / 18 * Math.PI * 2;
     const h = 1.5 + (Math.sin(i * 8) + 1) * 1.2;
@@ -107,6 +120,7 @@ function makeDemo() {
   demo.add(ring);
 }
 makeDemo();
+timeSimulator.setFlatGround(0,demo);
 const monitoring = createMonitoring({
   onOpen() {
     roaming = false;
@@ -133,6 +147,17 @@ function frameScene() {
   camera.updateProjectionMatrix();
   orbit.target.copy(center);
   orbit.update();
+}
+function frameSceneWithSky() {
+  frameScene();
+  if (bundledModel && model) {
+    const scale = model.scale.x;
+    // Leave room above the treeline for the sky instead of opening on a steep
+    // downward view where the header hides the entire horizon.
+    orbit.target.copy(spawn).addScaledVector(new THREE.Vector3(0, 8, 0), scale);
+    camera.position.copy(spawn).addScaledVector(new THREE.Vector3(30, 16, 40), scale);
+    orbit.update();
+  }
 }
 function resetPlayer() {
   runtime.spawn.copy(spawn);
@@ -176,11 +201,23 @@ $('ground').addEventListener('change', () => {
   const value = Number($('ground').value);
   if (!Number.isFinite(value)) return;
   spawn.y = value;
+  timeSimulator.setGroundHeight(spawn.y);
+  timeSimulator.setFlatGround(spawn.y);
   runtime.setFlatGround(value).catch(error => status(error.message, true));
   grid.position.y = value;
   resetPlayer();
 });
 $('frame').addEventListener('click', () => { setMode('orbit'); frameScene(); });
+$('sky-view').addEventListener('click', () => {
+  setMode('orbit');
+  // Keep the user's position; just aim toward the visible sun or moon.
+  // Avoid OrbitControls' singularity when the body is exactly at the zenith.
+  const direction = timeSimulator.getCelestialDirection();
+  if (direction.y > .999) direction.set(.015, 1, .015).normalize();
+  orbit.target.copy(camera.position).addScaledVector(direction, 100);
+  orbit.update();
+});
+$('sky-return').addEventListener('click', () => { setMode('orbit'); frameSceneWithSky(); });
 $('respawn').addEventListener('click', resetPlayer);
 
 function transformModel() {
@@ -204,17 +241,16 @@ function transformModel() {
   spawn.set(0, 0, Math.min(size.z * 0.25, 5));
   // Source-space ground estimate near the origin of the user's supplied survey scene.
   if (bundledModel) spawn.set(0, 0, 2.5).applyMatrix4(model.matrixWorld);
+  timeSimulator.setGroundHeight(spawn.y);
+  if(bundledModel)timeSimulator.clearTerrain();
+  else if(model.isMesh)timeSimulator.setTerrain(model);
+  else timeSimulator.setFlatGround(spawn.y);
   $('ground').value = spawn.y.toFixed(2);
   grid.position.y = spawn.y;
   if (collisionWorld && bundledModel) { collisionWorld = null; setMode('orbit'); loadCollision(loadSequence); }
   resetPlayer();
   if (mode === 'orbit') {
-    frameScene();
-    if (bundledModel) {
-      orbit.target.copy(spawn);
-      camera.position.copy(spawn).add(new THREE.Vector3(30, 25, 40).multiplyScalar(scale));
-      orbit.update();
-    }
+    frameSceneWithSky();
   }
 }
 $('scale').addEventListener('change', transformModel);
@@ -292,6 +328,7 @@ async function loadScene(request) {
     runtime.clearScene();
     collisionWorld = null;
     model = candidate;
+    timeSimulator.setModel(model);
     bundledModel = Boolean(url);
     localBounds = candidateBounds;
     scene.add(model);
@@ -336,10 +373,14 @@ renderer.setAnimationLoop(time => {
   if (!monitoring.isOpen && mode === 'orbit') orbit.update();
   runtime.update(dt, monitoring.isOpen || !roaming);
   controllerUI.update();
+  timeSimulator.update(dt, camera);
   $('motion-state').hidden = mode === 'orbit';
   if (mode !== 'orbit') $('motion-state').textContent = `${player.getIsFlying() ? '飞行' : player.getIsOnGround() ? '贴地' : '空中'} · 高度 ${runtime.feet.y.toFixed(2)} m`;
   monitoring.update(camera, innerWidth, innerHeight);
-  if (!monitoring.renderPreview(renderer, scene, time)) renderer.render(scene, camera);
+  if (!monitoring.renderPreview(renderer, scene, time, viewCamera => timeSimulator.render(viewCamera))) {
+    timeSimulator.render(camera);
+    renderer.render(scene, camera);
+  }
   frames++;
   if (time - fpsStart > 1000) { $('fps').textContent = `${Math.round(frames * 1000 / (time - fpsStart))} FPS`; fpsStart = time; frames = 0; }
 });
